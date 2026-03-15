@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import json
 import logging
 import os
 import random
+import re
 import time
 from types import SimpleNamespace
 from typing import Any, cast
@@ -391,6 +395,10 @@ class QQOfficialPlatformAdapter(Platform):
                 else:
                     msg.append(File(name=filename, file=url, url=url))
 
+    # Pre-compiled regex for parsing face messages
+    _FACE_TAG_PATTERN = re.compile(r"<faceType=\d+[^>]*>")
+    _FACE_EXT_PATTERN = re.compile(r'ext="([^"]*)"')
+
     @staticmethod
     def _parse_face_message(content: str) -> str:
         """Parse QQ official face message format and convert to readable text.
@@ -407,14 +415,10 @@ class QQOfficialPlatformAdapter(Platform):
         Returns:
             Content with face tags replaced by readable emoji descriptions.
         """
-        import base64
-        import json
-        import re
-
         def replace_face(match):
             face_tag = match.group(0)
             # Extract ext field from the face tag
-            ext_match = re.search(r'ext="([^"]*)"', face_tag)
+            ext_match = QQOfficialPlatformAdapter._FACE_EXT_PATTERN.search(face_tag)
             if ext_match:
                 try:
                     ext_encoded = ext_match.group(1)
@@ -424,13 +428,14 @@ class QQOfficialPlatformAdapter(Platform):
                     emoji_text = ext_data.get("text", "")
                     if emoji_text:
                         return f"[表情:{emoji_text}]"
-                except Exception:
+                except (binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
+                    # Malformed base64, JSON, or UTF-8 - return fallback
                     pass
             # Fallback if parsing fails
             return "[表情]"
 
         # Match face tags: <faceType=...>
-        return re.sub(r"<faceType=\d+[^>]*>", replace_face, content)
+        return QQOfficialPlatformAdapter._FACE_TAG_PATTERN.sub(replace_face, content)
 
     @staticmethod
     def _parse_from_qqofficial(
